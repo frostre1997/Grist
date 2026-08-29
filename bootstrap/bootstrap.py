@@ -11,22 +11,19 @@ class Parser:
         self.idx = 0
 
     def tokenize(self, src):
-        # Simple tokenizer: identifiers, numbers, strings, punctuation, operators
         token_re = re.compile(r'''\s*(?:
-            ([a-zA-Z_][a-zA-Z0-9_]*) |  # identifiers and keywords
-            (\d+) |                      # numbers
-            ("[^"]*") |                  # strings
-            (->) |                       # arrow
-            ([{}()\[\],:]) |             # braces, brackets, parens, colon, comma
-            (≈) |                        # assignment
-            (.)                          # catch-all
+            ([a-zA-Z_][a-zA-Z0-9_]*) |
+            (\d+) |
+            ("[^"]*") |
+            (->) |
+            ([{}()\[\],:]) |
+            (≈) |
+            (.)
         )''', re.VERBOSE)
         tokens = []
         for m in token_re.finditer(src):
-            # skip whitespace captured as empty
             if m.group(0).strip() == '':
                 continue
-            # identify token kind
             if m.group(1):
                 tokens.append(('ident', m.group(1)))
             elif m.group(2):
@@ -34,7 +31,7 @@ class Parser:
             elif m.group(3):
                 tokens.append(('string', m.group(3)))
             elif m.group(4):
-                tokens.append(('arrow', '->'))
+                tokens.append(('punct', '->'))
             elif m.group(5):
                 tokens.append(('punct', m.group(5)))
             elif m.group(6):
@@ -65,7 +62,6 @@ class Parser:
         return tok
 
     def parse(self):
-        # Top-level: daemon
         daemon_tok = self.next_token()
         if daemon_tok is None or daemon_tok[1] != 'daemon':
             raise SyntaxError("expected 'daemon'")
@@ -138,13 +134,11 @@ class Parser:
     def parse_build(self):
         self.expect('ident', 'build')
         self.expect('punct', '{')
-        # build block is just an expression block (for now)
         expr = self.parse_expr()
         self.expect('punct', '}')
         return expr
 
     def parse_expr(self):
-        # We'll parse a block (list of statements) as a list
         expr_list = []
         while True:
             tok = self.peek()
@@ -155,7 +149,6 @@ class Parser:
                 continue
             expr = self.parse_atom()
             expr_list.append(expr)
-            # optional semicolon
             if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ';':
                 self.next_token()
         return expr_list if len(expr_list) > 1 else expr_list[0] if expr_list else None
@@ -186,7 +179,7 @@ class Parser:
             raise SyntaxError(f"unexpected token {tok}")
 
     def parse_if(self):
-        self.next_token()  # consume 'if'
+        self.next_token()
         self.expect('punct', '(')
         cond = self.parse_atom()
         self.expect('punct', ')')
@@ -198,7 +191,7 @@ class Parser:
         return ('if', cond, then_expr, else_expr)
 
     def parse_while(self):
-        self.next_token()  # consume 'while'
+        self.next_token()
         self.expect('punct', '(')
         cond = self.parse_atom()
         self.expect('punct', ')')
@@ -206,12 +199,12 @@ class Parser:
         return ('while', cond, body)
 
     def parse_return(self):
-        self.next_token()  # consume 'return'
+        self.next_token()
         val = self.parse_atom()
         return ('return', val)
 
     def parse_print(self):
-        self.next_token()  # consume 'print'
+        self.next_token()
         self.expect('punct', '(')
         args = []
         while True:
@@ -226,12 +219,10 @@ class Parser:
 
     def parse_call_or_var(self):
         name_tok = self.next_token()
-        # check for assignment
         if self.peek() and self.peek()[0] == 'assign':
             self.next_token()
             rhs = self.parse_atom()
             return ('assign', name_tok[1], rhs)
-        # function call?
         if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == '(':
             self.next_token()
             args = []
@@ -244,17 +235,16 @@ class Parser:
                     break
             self.expect('punct', ')')
             return ('call', name_tok[1], args)
-        # variable reference
         return ('var', name_tok[1])
 
     def parse_paren(self):
-        self.next_token()  # consume '('
+        self.next_token()
         expr = self.parse_atom()
         self.expect('punct', ')')
         return expr
 
     def parse_array(self):
-        self.next_token()  # consume '['
+        self.next_token()
         elems = []
         while True:
             if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ']':
@@ -267,17 +257,13 @@ class Parser:
         return ('array', elems)
 
 def codegen(daemon, allocator):
-    # Generate C code from daemon AST
     c_funcs = ''
     c_intercepts = ''
     c_main = ''
-    # Generate functions first
     for fn in daemon['functions']:
         c_funcs += generate_function(fn)
-    # Generate intercepts
     for inter in daemon['intercepts']:
         c_intercepts += generate_intercept(inter)
-    # Build main
     c_main = generate_main(daemon)
     return f'''
 #include <stdio.h>
@@ -296,7 +282,6 @@ void handle_sigterm(int s) {{ running = 0; }}
 
 def generate_function(fn):
     params = ', '.join([f'const char* {p["name"]}' if p["type"] == 'str' else f'int {p["name"]}' for p in fn['params']])
-    ret = 'int'  # for simplicity
     body = generate_expr(fn['body'])
     return f'''
 int {fn['name']}({params}) {{
@@ -330,7 +315,6 @@ def generate_expr(expr):
     if expr is None:
         return ''
     if isinstance(expr, list):
-        # block
         return ';\n    '.join([generate_expr(e) for e in expr if e is not None])
     if isinstance(expr, tuple):
         op = expr[0]
@@ -360,13 +344,9 @@ def generate_expr(expr):
             return expr[1]
         elif op == 'array':
             elems = ', '.join([generate_expr(e) for e in expr[1]])
-            return f'({elems})'  # not fully supported
+            return f'({elems})'
     if isinstance(expr, tuple) and len(expr)==2:
-        # could be token tuple
         return str(expr[1])
-    if isinstance(expr, dict):
-        # not used
-        return ''
     return str(expr)
 
 def main():

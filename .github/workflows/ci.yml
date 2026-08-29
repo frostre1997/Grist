@@ -14,11 +14,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Install Zig
+      - name: Install Zig 0.14.0
         run: |
-          curl -L https://ziglang.org/download/0.16.0/zig-linux-x86_64-0.16.0.tar.xz -o zig.tar.xz
+          curl -L https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz -o zig.tar.xz
           tar -xf zig.tar.xz
-          echo "$(pwd)/zig-linux-x86_64-0.16.0" >> $GITHUB_PATH
+          echo "$(pwd)/zig-linux-x86_64-0.14.0" >> $GITHUB_PATH
 
       - name: Verify Zig
         run: zig version
@@ -32,24 +32,24 @@ jobs:
       - name: Compile minimal.gr
         run: ./zig-out/bin/gristc minimal.gr
 
-      - name: Run daemon in background
+      - name: Run daemon
         run: |
           ./minimal.gr.out &
           sleep 2
 
-      - name: Check daemon is running
+      - name: Check daemon
         run: pgrep -f minimal.gr.out || exit 1
 
       - name: Stop daemon
         run: pkill -f minimal.gr.out || true
 
-      - name: Upload gristc binary
+      - name: Upload gristc
         uses: actions/upload-artifact@v7
         with:
           name: gristc-linux
           path: zig-out/bin/gristc
 
-      - name: Upload minimal daemon
+      - name: Upload daemon
         uses: actions/upload-artifact@v7
         with:
           name: minimal-daemon-linux

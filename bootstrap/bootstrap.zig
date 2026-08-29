@@ -58,14 +58,6 @@ const Lexer = struct {
         }
     }
 
-    fn isAlpha(c: u8) bool {
-        return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c == '-';
-    }
-
-    fn isDigit(c: u8) bool {
-        return c >= '0' and c <= '9';
-    }
-
     fn token(self: *Lexer) Token {
         self.skipWhitespace();
         const start_line = self.line;
@@ -83,15 +75,15 @@ const Lexer = struct {
             _ = self.next();
             return Token{ .kind = .string, .text = text, .line = start_line, .col = start_col };
         }
-        if (self.isDigit(c)) {
+        if (isDigit(c)) {
             const start = self.pos;
-            while (self.isDigit(self.peek())) _ = self.next();
+            while (isDigit(self.peek())) _ = self.next();
             const text = self.source[start..self.pos];
             return Token{ .kind = .number, .text = text, .line = start_line, .col = start_col };
         }
-        if (self.isAlpha(c)) {
+        if (isAlpha(c)) {
             const start = self.pos;
-            while (self.isAlpha(self.peek()) or self.isDigit(self.peek())) _ = self.next();
+            while (isAlpha(self.peek()) or isDigit(self.peek())) _ = self.next();
             const text = self.source[start..self.pos];
             const kind = blk: {
                 if (std.mem.eql(u8, text, "daemon")) break :blk .kw_daemon;
@@ -131,6 +123,14 @@ const Lexer = struct {
     }
 };
 
+fn isAlpha(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c == '-';
+}
+
+fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
+}
+
 const Expr = struct {
     const Kind = enum { call, ident, number, string, block, ifexpr, whileexpr, ret, assign };
     kind: Kind,
@@ -162,7 +162,11 @@ const Parser = struct {
     current: Token,
 
     fn init(allocator: std.mem.Allocator, lexer: *Lexer) Parser {
-        var p = Parser{ .lexer = lexer, .allocator = allocator, .current = lexer.token() };
+        const p = Parser{
+            .lexer = lexer,
+            .allocator = allocator,
+            .current = lexer.token(),
+        };
         return p;
     }
 
@@ -276,16 +280,22 @@ const Parser = struct {
     }
 };
 
+const Intercept = struct {
+    name: []const u8,
+    params: std.ArrayList([]const u8),
+    body: *Expr,
+};
+
 const Daemon = struct {
     name: []const u8,
-    intercepts: std.ArrayList(struct { name: []const u8, params: std.ArrayList([]const u8), body: *Expr }),
+    intercepts: std.ArrayList(Intercept),
     builds: std.ArrayList(*Expr),
     allocator: std.mem.Allocator,
 
     fn init(allocator: std.mem.Allocator) Daemon {
         return Daemon{
             .name = "",
-            .intercepts = std.ArrayList(struct { name: []const u8, params: std.ArrayList([]const u8), body: *Expr }).init(allocator),
+            .intercepts = std.ArrayList(Intercept).init(allocator),
             .builds = std.ArrayList(*Expr).init(allocator),
             .allocator = allocator,
         };
@@ -474,7 +484,7 @@ pub fn main() !void {
     const c_path = try std.fmt.allocPrint(alloc, "{s}.c", .{path});
     defer alloc.free(c_path);
 
-    try std.fs.cwd().writeFile(c_path, c_code);
+    try std.fs.cwd().writeFile(.{ .sub_path = c_path, .data = c_code });
 
     const out_name = try std.fmt.allocPrint(alloc, "{s}.out", .{path});
     defer alloc.free(out_name);

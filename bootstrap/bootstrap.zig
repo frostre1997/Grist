@@ -81,6 +81,10 @@ const Lexer = struct {
             const text = self.source[start..self.pos];
             return Token{ .kind = .number, .text = text, .line = start_line, .col = start_col };
         }
+        if (c == '-' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '>') {
+            _ = self.next(); _ = self.next();
+            return Token{ .kind = .arrow, .text = "->", .line = start_line, .col = start_col };
+        }
         if (isAlpha(c)) {
             const start = self.pos;
             while (isAlpha(self.peek()) or isDigit(self.peek())) _ = self.next();

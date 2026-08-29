@@ -5,7 +5,4 @@ daemon minimal () {
     (print "\n")
     return none
   }
-  build {
-    output "minimal.daemon"
-  }
 }

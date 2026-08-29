@@ -1,0 +1,110 @@
+daemon gristc () {
+
+  fn tokenize (src : str) -> [str] {
+    tokens = []
+    i = 0
+    len = (str-len src)
+    (while (lt i len) {
+      c = (str-sub src i (add i 1))
+      (if (or (eq c " ") (eq c "\n") (eq c "\t") (eq c "\r")) {
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c "\"") {
+        i = (add i 1)
+        start = i
+        (while (and (lt i len) (not (eq (str-sub src i (add i 1)) "\""))) {
+          i = (add i 1)
+        })
+        tok = (str-sub src start i)
+        tokens = (push tokens tok)
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c "(") {
+        tokens = (push tokens "(")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c ")") {
+        tokens = (push tokens ")")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c "{") {
+        tokens = (push tokens "{")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c "}") {
+        tokens = (push tokens "}")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c ",") {
+        tokens = (push tokens ",")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (eq c ":") {
+        tokens = (push tokens ":")
+        i = (add i 1)
+        (continue)
+      } {})
+      (if (and (eq c "-") (lt (add i 1) len) (eq (str-sub src (add i 1) (add i 2)) ">")) {
+        tokens = (push tokens "->")
+        i = (add i 2)
+        (continue)
+      } {})
+      (if (is-alpha c) {
+        start = i
+        (while (and (lt i len) (or (is-alpha (str-sub src i (add i 1))) (is-digit (str-sub src i (add i 1))))) {
+          i = (add i 1)
+        })
+        tok = (str-sub src start i)
+        tokens = (push tokens tok)
+        (continue)
+      } {})
+      (if (is-digit c) {
+        start = i
+        (while (and (lt i len) (is-digit (str-sub src i (add i 1)))) {
+          i = (add i 1)
+        })
+        tok = (str-sub src start i)
+        tokens = (push tokens tok)
+        (continue)
+      } {})
+      i = (add i 1)
+    })
+    (return tokens)
+  }
+
+  fn is-alpha (c : str) -> int {
+    (return (or (and (ge (ord c) (ord "a")) (le (ord c) (ord "z")))
+                (and (ge (ord c) (ord "A")) (le (ord c) (ord "Z")))))
+  }
+
+  fn is-digit (c : str) -> int {
+    (return (and (ge (ord c) (ord "0")) (le (ord c) (ord "9"))))
+  }
+
+  fn ord (c : str) -> int { (return (call ord c)) }
+  fn ge (a : int, b : int) -> int { (return (not (lt a b))) }
+  fn le (a : int, b : int) -> int { (return (not (gt a b))) }
+  fn gt (a : int, b : int) -> int { (return (lt b a)) }
+  fn or (a : int, b : int) -> int { (return (if a 1 (if b 1 0))) }
+  fn and (a : int, b : int) -> int { (return (if a (if b 1 0) 0)) }
+  fn not (a : int) -> int { (return (if a 0 1)) }
+  fn eq (a : str, b : str) -> int { (return (call eq a b)) }
+  fn add (a : int, b : int) -> int { (return (call add a b)) }
+  fn sub (a : int, b : int) -> int { (return (call sub a b)) }
+  fn lt (a : int, b : int) -> int { (return (call lt a b)) }
+
+  build {
+    (print "compiler ready")
+    src = (read-file "minimal.gr")
+    tokens = (call tokenize src)
+    (print "tokens: ")
+    (print tokens)
+  }
+}

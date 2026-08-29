@@ -3,6 +3,6 @@ daemon minimal () {
     (print "intercepted: ")
     (print path)
     (print "\n")
-    return none
+    (return none)
   }
 }

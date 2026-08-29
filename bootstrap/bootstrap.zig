@@ -210,6 +210,26 @@ fn parseExpression(lexer: *Lexer, allocator: std.mem.Allocator) *Expr {
         }
         return block;
     }
+    if (tok.kind == .kw_print) {
+        const next = lexer.token();
+        if (next.kind != .lparen) {
+            std.debug.print("expected '(' after print at {}:{}\n", .{next.line, next.col});
+            std.process.exit(1);
+        }
+        const call = Expr.init(allocator, .call);
+        call.text = "print";
+        while (true) {
+            const arg = parseExpression(lexer, allocator);
+            call.children.append(arg) catch @panic("append");
+            const sep = lexer.token();
+            if (sep.kind == .rparen) break;
+            if (sep.kind != .comma) {
+                std.debug.print("expected comma or rparen at {}:{}\n", .{sep.line, sep.col});
+                std.process.exit(1);
+            }
+        }
+        return call;
+    }
     if (tok.kind == .ident) {
         const next = lexer.token();
         if (next.kind == .eq) {

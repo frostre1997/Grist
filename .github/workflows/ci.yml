@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Install C compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Build gristc
+        run: zig build
+
+      - name: Compile minimal.gr
+        run: ./zig-out/bin/gristc minimal.gr
+
+      - name: Run daemon in background
+        run: |
+          ./minimal.gr.out &
+          sleep 2
+
+      - name: Check daemon is running
+        run: pgrep -f minimal.gr.out || exit 1
+
+      - name: Stop daemon
+        run: pkill -f minimal.gr.out || true
+
+      - name: Upload gristc binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: gristc-linux
+          path: zig-out/bin/gristc
+
+      - name: Upload minimal daemon
+        uses: actions/upload-artifact@v7
+        with:
+          name: minimal-daemon-linux
+          path: minimal.gr.out

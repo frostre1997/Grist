@@ -6,38 +6,73 @@ import os
 class Parser:
     def __init__(self, src):
         self.src = src
-        self.pos = 0
         self.tokens = self.tokenize(src)
         self.idx = 0
 
     def tokenize(self, src):
-        token_re = re.compile(r'''\s*(?:
-            ([a-zA-Z_][a-zA-Z0-9_]*) |
-            (\d+) |
-            ("[^"]*") |
-            (->) |
-            ([{}()\[\],:]) |
-            (≈) |
-            (.)
-        )''', re.VERBOSE)
         tokens = []
-        for m in token_re.finditer(src):
-            if m.group(0).strip() == '':
+        i = 0
+        n = len(src)
+        while i < n:
+            c = src[i]
+            # skip whitespace
+            if c in ' \t\n\r':
+                i += 1
                 continue
-            if m.group(1):
-                tokens.append(('ident', m.group(1)))
-            elif m.group(2):
-                tokens.append(('number', m.group(2)))
-            elif m.group(3):
-                tokens.append(('string', m.group(3)))
-            elif m.group(4):
+            # skip comments: (| ... |)
+            if c == '(' and i+1 < n and src[i+1] == '|':
+                i += 2
+                while i < n and not (src[i] == '|' and i+1 < n and src[i+1] == ')'):
+                    i += 1
+                i += 2
+                continue
+            # string literal
+            if c == '"':
+                i += 1
+                start = i
+                while i < n and src[i] != '"':
+                    if src[i] == '\\':
+                        i += 2
+                    else:
+                        i += 1
+                if i >= n:
+                    raise SyntaxError("unclosed string")
+                text = src[start:i]
+                i += 1
+                tokens.append(('string', text))
+                continue
+            # number
+            if c.isdigit():
+                start = i
+                while i < n and src[i].isdigit():
+                    i += 1
+                tokens.append(('number', src[start:i]))
+                continue
+            # arrow -> 
+            if c == '-' and i+1 < n and src[i+1] == '>':
                 tokens.append(('punct', '->'))
-            elif m.group(5):
-                tokens.append(('punct', m.group(5)))
-            elif m.group(6):
+                i += 2
+                continue
+            # identifier or keyword
+            if c.isalpha() or c == '_':
+                start = i
+                while i < n and (src[i].isalnum() or src[i] == '_'):
+                    i += 1
+                ident = src[start:i]
+                tokens.append(('ident', ident))
+                continue
+            # assignment ≈
+            if c == '≈':
                 tokens.append(('assign', '≈'))
-            else:
-                tokens.append(('unknown', m.group(0)))
+                i += 1
+                continue
+            # single punctuation
+            if c in '{}()[]:,;':
+                tokens.append(('punct', c))
+                i += 1
+                continue
+            # anything else (should not happen)
+            raise SyntaxError(f"unexpected character '{c}' at position {i}")
         return tokens
 
     def peek(self):
@@ -56,12 +91,13 @@ class Parser:
         if tok is None:
             raise SyntaxError(f"expected {typ} but got EOF")
         if tok[0] != typ:
-            raise SyntaxError(f"expected {typ} but got {tok[0]}")
+            raise SyntaxError(f"expected {typ} but got {tok[0]} (value: {tok[1]})")
         if val is not None and tok[1] != val:
             raise SyntaxError(f"expected '{val}' but got '{tok[1]}'")
         return tok
 
     def parse(self):
+        # daemon
         daemon_tok = self.next_token()
         if daemon_tok is None or daemon_tok[1] != 'daemon':
             raise SyntaxError("expected 'daemon'")
@@ -256,7 +292,7 @@ class Parser:
         self.expect('punct', ']')
         return ('array', elems)
 
-def codegen(daemon, allocator):
+def codegen(daemon):
     c_funcs = ''
     c_intercepts = ''
     c_main = ''
@@ -332,7 +368,14 @@ def generate_expr(expr):
             return f'return {val};'
         elif op == 'print':
             args = ', '.join([generate_expr(a) for a in expr[1]])
-            return f'printf({args})'
+            # convert string tokens to quoted strings
+            arg_strs = []
+            for a in expr[1]:
+                if isinstance(a, tuple) and a[0] == 'string':
+                    arg_strs.append(f'"{a[1]}"')
+                else:
+                    arg_strs.append(generate_expr(a))
+            return f'printf({", ".join(arg_strs)})'
         elif op == 'assign':
             rhs = generate_expr(expr[2])
             return f'{expr[1]} = {rhs}'
@@ -345,8 +388,10 @@ def generate_expr(expr):
         elif op == 'array':
             elems = ', '.join([generate_expr(e) for e in expr[1]])
             return f'({elems})'
-    if isinstance(expr, tuple) and len(expr)==2:
-        return str(expr[1])
+    if isinstance(expr, tuple) and len(expr)==2 and expr[0] == 'string':
+        return f'"{expr[1]}"'
+    if isinstance(expr, tuple) and len(expr)==2 and expr[0] == 'number':
+        return expr[1]
     return str(expr)
 
 def main():
@@ -365,7 +410,7 @@ def main():
         print(f"Parse error: {e}")
         sys.exit(1)
 
-    c_code = codegen(daemon, None)
+    c_code = codegen(daemon)
     c_file = gr_file + '.c'
     with open(c_file, 'w') as f:
         f.write(c_code)

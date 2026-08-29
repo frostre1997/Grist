@@ -58,6 +58,17 @@ const Lexer = struct {
         }
     }
 
+    fn peekToken(self: *Lexer) Token {
+        const saved_pos = self.pos;
+        const saved_line = self.line;
+        const saved_col = self.col;
+        const tok = self.token();
+        self.pos = saved_pos;
+        self.line = saved_line;
+        self.col = saved_col;
+        return tok;
+    }
+
     fn token(self: *Lexer) Token {
         self.skipWhitespace();
         const start_line = self.line;
@@ -73,23 +84,17 @@ const Lexer = struct {
             }
             const text = self.source[start..self.pos];
             _ = self.next();
-            const tok = Token{ .kind = .string, .text = text, .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok;
+            return Token{ .kind = .string, .text = text, .line = start_line, .col = start_col };
         }
         if (isDigit(c)) {
             const start = self.pos;
             while (isDigit(self.peek())) _ = self.next();
             const text = self.source[start..self.pos];
-            const tok = Token{ .kind = .number, .text = text, .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok;
+            return Token{ .kind = .number, .text = text, .line = start_line, .col = start_col };
         }
         if (c == '-' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '>') {
             _ = self.next(); _ = self.next();
-            const tok = Token{ .kind = .arrow, .text = "->", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok;
+            return Token{ .kind = .arrow, .text = "->", .line = start_line, .col = start_col };
         }
         if (isAlpha(c)) {
             const start = self.pos;
@@ -119,40 +124,18 @@ const Lexer = struct {
             } else if (std.mem.eql(u8, text, "none")) {
                 kind = .kw_none;
             }
-            const tok = Token{ .kind = kind, .text = text, .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok;
+            return Token{ .kind = kind, .text = text, .line = start_line, .col = start_col };
         }
-        if (c == '(') { _ = self.next(); const tok = Token{ .kind = .lparen, .text = "(", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == ')') { _ = self.next(); const tok = Token{ .kind = .rparen, .text = ")", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == '{') { _ = self.next(); const tok = Token{ .kind = .lbrace, .text = "{", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == '}') { _ = self.next(); const tok = Token{ .kind = .rbrace, .text = "}", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == ',') { _ = self.next(); const tok = Token{ .kind = .comma, .text = ",", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == ':') { _ = self.next(); const tok = Token{ .kind = .colon, .text = ":", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == '≈') { _ = self.next(); const tok = Token{ .kind = .eq, .text = "≈", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == '→') { _ = self.next(); const tok = Token{ .kind = .arrow, .text = "→", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        if (c == '∀') { _ = self.next(); const tok = Token{ .kind = .forall, .text = "∀", .line = start_line, .col = start_col };
-            std.debug.print("[DEBUG] token: {s} '{s}' at {}:{}\n", .{ @tagName(tok.kind), tok.text, tok.line, tok.col });
-            return tok; }
-        const tok = Token{ .kind = .eof, .text = "", .line = start_line, .col = start_col };
-        std.debug.print("[DEBUG] token: {s} '' at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
-        return tok;
+        if (c == '(') { _ = self.next(); return Token{ .kind = .lparen, .text = "(", .line = start_line, .col = start_col }; }
+        if (c == ')') { _ = self.next(); return Token{ .kind = .rparen, .text = ")", .line = start_line, .col = start_col }; }
+        if (c == '{') { _ = self.next(); return Token{ .kind = .lbrace, .text = "{", .line = start_line, .col = start_col }; }
+        if (c == '}') { _ = self.next(); return Token{ .kind = .rbrace, .text = "}", .line = start_line, .col = start_col }; }
+        if (c == ',') { _ = self.next(); return Token{ .kind = .comma, .text = ",", .line = start_line, .col = start_col }; }
+        if (c == ':') { _ = self.next(); return Token{ .kind = .colon, .text = ":", .line = start_line, .col = start_col }; }
+        if (c == '≈') { _ = self.next(); return Token{ .kind = .eq, .text = "≈", .line = start_line, .col = start_col }; }
+        if (c == '→') { _ = self.next(); return Token{ .kind = .arrow, .text = "→", .line = start_line, .col = start_col }; }
+        if (c == '∀') { _ = self.next(); return Token{ .kind = .forall, .text = "∀", .line = start_line, .col = start_col }; }
+        return Token{ .kind = .eof, .text = "", .line = start_line, .col = start_col };
     }
 
     fn expect(self: *Lexer, kind: TokenKind) Token {
@@ -310,14 +293,19 @@ const Parser = struct {
     fn parseParams(self: *Parser) std.ArrayList([]const u8) {
         var params = std.ArrayList([]const u8).init(self.allocator);
         _ = self.lexer.expect(.lparen);
-        while (self.current.kind != .rparen) {
+        while (true) {
+            if (self.lexer.peekToken().kind == .rparen) {
+                _ = self.lexer.token();
+                break;
+            }
             const id = self.lexer.expect(.ident);
             _ = self.lexer.expect(.colon);
             _ = self.lexer.expect(.ident);
             params.append(id.text) catch @panic("append");
-            if (self.current.kind == .comma) self.advance();
+            if (self.lexer.peekToken().kind == .comma) {
+                _ = self.lexer.token();
+            }
         }
-        _ = self.lexer.token();
         return params;
     }
 };

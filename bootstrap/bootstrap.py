@@ -1,4 +1,3 @@
-cat > bootstrap/bootstrap.py << 'EOF'
 #!/usr/bin/env python3
 import sys
 import os

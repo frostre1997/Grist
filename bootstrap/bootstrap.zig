@@ -141,9 +141,11 @@ const Expr = struct {
 
     fn init(allocator: std.mem.Allocator, kind: Kind) *Expr {
         const e = allocator.create(Expr) catch @panic("alloc");
-        e.kind = kind;
-        e.children = std.ArrayList(*Expr).init(allocator);
-        e.allocator = allocator;
+        e.* = .{
+            .kind = kind,
+            .children = std.ArrayList(*Expr).init(allocator),
+            .allocator = allocator,
+        };
         return e;
     }
 
@@ -333,58 +335,6 @@ fn parseDaemon(allocator: std.mem.Allocator, lexer: *Lexer) Daemon {
     return daemon;
 }
 
-fn generateC(daemon: *Daemon, allocator: std.mem.Allocator) ![]u8 {
-    var code = std.ArrayList(u8).init(allocator);
-
-    try code.appendSlice(
-        "#include <stdio.h>\n" ++
-        "#include <unistd.h>\n" ++
-        "#include <signal.h>\n" ++
-        "#include <string.h>\n" ++
-        "\n" ++
-        "int running = 1;\n" ++
-        "void handle_sigterm(int s) { running = 0; }\n" ++
-        "\n"
-    );
-
-    for (daemon.intercepts.items) |inter| {
-        try code.appendSlice("int ");
-        try code.appendSlice(inter.name);
-        try code.appendSlice("_intercept(");
-        for (inter.params.items, 0..) |p, idx| {
-            if (idx > 0) try code.appendSlice(", ");
-            try code.appendSlice("const char* ");
-            try code.appendSlice(p);
-        }
-        try code.appendSlice(") {\n");
-        try code.appendSlice("    ");
-
-        const body = inter.body;
-        if (body.kind == .block) {
-            for (body.children.items) |child| {
-                try codegenExpr(child, &code);
-                try code.appendSlice(";\n    ");
-            }
-        } else {
-            try codegenExpr(body, &code);
-            try code.appendSlice(";\n");
-        }
-        try code.appendSlice("    return 0;\n");
-        try code.appendSlice("}\n\n");
-    }
-
-    try code.appendSlice(
-        "int main() {\n" ++
-        "    signal(SIGTERM, handle_sigterm);\n" ++
-        "    printf(\"grind daemon started\\n\");\n" ++
-        "    while (running) { sleep(1); }\n" ++
-        "    return 0;\n" ++
-        "}\n"
-    );
-
-    return code.toOwnedSlice();
-}
-
 fn codegenExpr(expr: *Expr, code: *std.ArrayList(u8)) !void {
     switch (expr.kind) {
         .number => try code.writer().print("{}", .{expr.ival}),
@@ -445,6 +395,58 @@ fn codegenExpr(expr: *Expr, code: *std.ArrayList(u8)) !void {
     }
 }
 
+fn generateC(daemon: *Daemon, allocator: std.mem.Allocator) ![]u8 {
+    var code = std.ArrayList(u8).init(allocator);
+
+    try code.appendSlice(
+        "#include <stdio.h>\n" ++
+        "#include <unistd.h>\n" ++
+        "#include <signal.h>\n" ++
+        "#include <string.h>\n" ++
+        "\n" ++
+        "int running = 1;\n" ++
+        "void handle_sigterm(int s) { running = 0; }\n" ++
+        "\n"
+    );
+
+    for (daemon.intercepts.items) |inter| {
+        try code.appendSlice("int ");
+        try code.appendSlice(inter.name);
+        try code.appendSlice("_intercept(");
+        for (inter.params.items, 0..) |p, idx| {
+            if (idx > 0) try code.appendSlice(", ");
+            try code.appendSlice("const char* ");
+            try code.appendSlice(p);
+        }
+        try code.appendSlice(") {\n");
+        try code.appendSlice("    ");
+
+        const body = inter.body;
+        if (body.kind == .block) {
+            for (body.children.items) |child| {
+                try codegenExpr(child, &code);
+                try code.appendSlice(";\n    ");
+            }
+        } else {
+            try codegenExpr(body, &code);
+            try code.appendSlice(";\n");
+        }
+        try code.appendSlice("    return 0;\n");
+        try code.appendSlice("}\n\n");
+    }
+
+    try code.appendSlice(
+        "int main() {\n" ++
+        "    signal(SIGTERM, handle_sigterm);\n" ++
+        "    printf(\"grind daemon started\\n\");\n" ++
+        "    while (running) { sleep(1); }\n" ++
+        "    return 0;\n" ++
+        "}\n"
+    );
+
+    return code.toOwnedSlice();
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -477,13 +479,16 @@ pub fn main() !void {
     const out_name = try std.fmt.allocPrint(alloc, "{s}.out", .{path});
     defer alloc.free(out_name);
 
-    const gcc_cmd = try std.fmt.allocPrint(alloc, "gcc -o {s} {s}", .{out_name, c_path});
-    defer alloc.free(gcc_cmd);
-
-    _ = try std.process.exec(.{
-        .allocator = alloc,
-        .argv = &[_][]const u8{ "sh", "-c", gcc_cmd },
-    });
+    const cc = "cc";
+    var child = std.process.Child.init(&[_][]const u8{ cc, "-o", out_name, c_path }, alloc);
+    child.stderr = .ignore;
+    child.stdout = .ignore;
+    child.stdin = .ignore;
+    const term = try child.spawnAndWait();
+    if (term != .Exited or term.Exited != 0) {
+        std.debug.print("compilation failed\n", .{});
+        return;
+    }
 
     std.debug.print("compiled: {s}\n", .{out_name});
 }

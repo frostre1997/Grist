@@ -15,9 +15,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.16.0
+        run: |
+          curl -L https://ziglang.org/download/0.16.0/zig-linux-x86_64-0.16.0.tar.xz -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "$(pwd)/zig-linux-x86_64-0.16.0" >> $GITHUB_PATH
+
+      - name: Verify Zig
+        run: zig version
 
       - name: Install C compiler
         run: sudo apt-get update && sudo apt-get install -y gcc

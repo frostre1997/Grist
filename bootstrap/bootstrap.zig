@@ -138,7 +138,7 @@ const Lexer = struct {
 };
 
 fn isAlpha(c: u8) bool {
-    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c == '-';
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_';
 }
 
 fn isDigit(c: u8) bool {

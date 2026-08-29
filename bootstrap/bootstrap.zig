@@ -85,20 +85,18 @@ const Lexer = struct {
             const start = self.pos;
             while (isAlpha(self.peek()) or isDigit(self.peek())) _ = self.next();
             const text = self.source[start..self.pos];
-            const kind = blk: {
-                if (std.mem.eql(u8, text, "daemon")) break :blk .kw_daemon;
-                if (std.mem.eql(u8, text, "fn")) break :blk .kw_fn;
-                if (std.mem.eql(u8, text, "intercept")) break :blk .kw_intercept;
-                if (std.mem.eql(u8, text, "schedule")) break :blk .kw_schedule;
-                if (std.mem.eql(u8, text, "hotswap")) break :blk .kw_hotswap;
-                if (std.mem.eql(u8, text, "build")) break :blk .kw_build;
-                if (std.mem.eql(u8, text, "return")) break :blk .kw_return;
-                if (std.mem.eql(u8, text, "if")) break :blk .kw_if;
-                if (std.mem.eql(u8, text, "while")) break :blk .kw_while;
-                if (std.mem.eql(u8, text, "print")) break :blk .kw_print;
-                if (std.mem.eql(u8, text, "none")) break :blk .kw_none;
-                break :blk .ident;
-            };
+            var kind: TokenKind = .ident;
+            if (std.mem.eql(u8, text, "daemon")) kind = .kw_daemon;
+            else if (std.mem.eql(u8, text, "fn")) kind = .kw_fn;
+            else if (std.mem.eql(u8, text, "intercept")) kind = .kw_intercept;
+            else if (std.mem.eql(u8, text, "schedule")) kind = .kw_schedule;
+            else if (std.mem.eql(u8, text, "hotswap")) kind = .kw_hotswap;
+            else if (std.mem.eql(u8, text, "build")) kind = .kw_build;
+            else if (std.mem.eql(u8, text, "return")) kind = .kw_return;
+            else if (std.mem.eql(u8, text, "if")) kind = .kw_if;
+            else if (std.mem.eql(u8, text, "while")) kind = .kw_while;
+            else if (std.mem.eql(u8, text, "print")) kind = .kw_print;
+            else if (std.mem.eql(u8, text, "none")) kind = .kw_none;
             return Token{ .kind = kind, .text = text, .line = start_line, .col = start_col };
         }
         if (c == '(') { _ = self.next(); return Token{ .kind = .lparen, .text = "(", .line = start_line, .col = start_col }; }
@@ -491,9 +489,7 @@ pub fn main() !void {
 
     const cc = "cc";
     var child = std.process.Child.init(&[_][]const u8{ cc, "-o", out_name, c_path }, alloc);
-    child.stderr = .ignore;
-    child.stdout = .ignore;
-    child.stdin = .ignore;
+    // Default stdio behavior (inherit) is fine for CI; we don't need to set ignore.
     const term = try child.spawnAndWait();
     if (term != .Exited or term.Exited != 0) {
         std.debug.print("compilation failed\n", .{});

@@ -58,6 +58,17 @@ const Lexer = struct {
         }
     }
 
+    fn peekToken(self: *Lexer) Token {
+        const saved_pos = self.pos;
+        const saved_line = self.line;
+        const saved_col = self.col;
+        const tok = self.token();
+        self.pos = saved_pos;
+        self.line = saved_line;
+        self.col = saved_col;
+        return tok;
+    }
+
     fn token(self: *Lexer) Token {
         self.skipWhitespace();
         const start_line = self.line;
@@ -210,25 +221,28 @@ fn parseExpression(lexer: *Lexer, allocator: std.mem.Allocator) *Expr {
         }
         return block;
     }
-    if (tok.kind == .kw_print) {
-        const next = lexer.token();
-        if (next.kind != .lparen) {
-            std.debug.print("expected '(' after print at {}:{}\n", .{next.line, next.col});
-            std.process.exit(1);
-        }
-        const call = Expr.init(allocator, .call);
-        call.text = "print";
-        while (true) {
-            const arg = parseExpression(lexer, allocator);
-            call.children.append(arg) catch @panic("append");
-            const sep = lexer.token();
-            if (sep.kind == .rparen) break;
-            if (sep.kind != .comma) {
-                std.debug.print("expected comma or rparen at {}:{}\n", .{sep.line, sep.col});
-                std.process.exit(1);
+    if (tok.kind == .lparen) {
+        const peek = lexer.peekToken();
+        if (peek.kind == .kw_print) {
+            _ = lexer.token();
+            const call = Expr.init(allocator, .call);
+            call.text = "print";
+            while (true) {
+                const arg = parseExpression(lexer, allocator);
+                call.children.append(arg) catch @panic("append");
+                const sep = lexer.token();
+                if (sep.kind == .rparen) break;
+                if (sep.kind != .comma) {
+                    std.debug.print("expected comma or rparen at {}:{}\n", .{sep.line, sep.col});
+                    std.process.exit(1);
+                }
             }
+            return call;
+        } else {
+            const expr = parseExpression(lexer, allocator);
+            _ = lexer.expect(.rparen);
+            return expr;
         }
-        return call;
     }
     if (tok.kind == .ident) {
         const next = lexer.token();
@@ -267,11 +281,6 @@ fn parseExpression(lexer: *Lexer, allocator: std.mem.Allocator) *Expr {
         const str = Expr.init(allocator, .string);
         str.text = tok.text;
         return str;
-    }
-    if (tok.kind == .lparen) {
-        const expr = parseExpression(lexer, allocator);
-        _ = lexer.expect(.rparen);
-        return expr;
     }
     std.debug.print("unexpected token {s} at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
     std.process.exit(1);

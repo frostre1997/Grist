@@ -1,0 +1,11 @@
+daemon minimal () {
+  intercept stat (path : str) -> int {
+    (print "intercepted: ")
+    (print path)
+    (print "\n")
+    return none
+  }
+  build {
+    output "minimal.daemon"
+  }
+}

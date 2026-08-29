@@ -170,162 +170,92 @@ const Expr = struct {
     }
 };
 
-const Parser = struct {
-    lexer: *Lexer,
-    allocator: std.mem.Allocator,
-    current: Token,
-
-    fn init(allocator: std.mem.Allocator, lexer: *Lexer) Parser {
-        const p = Parser{
-            .lexer = lexer,
-            .allocator = allocator,
-            .current = lexer.token(),
-        };
-        return p;
+fn parseExpression(lexer: *Lexer, allocator: std.mem.Allocator) *Expr {
+    const tok = lexer.token();
+    if (tok.kind == .kw_return) {
+        const ret = Expr.init(allocator, .ret);
+        const child = parseExpression(lexer, allocator);
+        ret.children.append(child) catch @panic("append");
+        return ret;
     }
-
-    fn advance(self: *Parser) void {
-        self.current = self.lexer.token();
+    if (tok.kind == .kw_if) {
+        _ = lexer.expect(.lparen);
+        const cond = parseExpression(lexer, allocator);
+        _ = lexer.expect(.rparen);
+        const then_expr = parseExpression(lexer, allocator);
+        const else_expr = parseExpression(lexer, allocator);
+        const node = Expr.init(allocator, .ifexpr);
+        node.children.append(cond) catch @panic("append");
+        node.children.append(then_expr) catch @panic("append");
+        node.children.append(else_expr) catch @panic("append");
+        return node;
     }
-
-    fn parseExpr(self: *Parser) *Expr {
-        const tok = self.current;
-        if (tok.kind == .kw_return) {
-            self.advance();
-            const expr = self.parseExpr();
-            const ret = Expr.init(self.allocator, .ret);
-            ret.children.append(expr) catch @panic("append");
-            return ret;
-        }
-        if (tok.kind == .kw_if) {
-            self.advance();
-            _ = self.lexer.expect(.lparen);
-            self.current = self.lexer.token();
-            const cond = self.parseExpr();
-            _ = self.lexer.expect(.rparen);
-            self.current = self.lexer.token();
-            const then_expr = self.parseExpr();
-            const else_expr = self.parseExpr();
-            const node = Expr.init(self.allocator, .ifexpr);
-            node.children.append(cond) catch @panic("append");
-            node.children.append(then_expr) catch @panic("append");
-            node.children.append(else_expr) catch @panic("append");
-            return node;
-        }
-        if (tok.kind == .kw_while) {
-            self.advance();
-            _ = self.lexer.expect(.lparen);
-            self.current = self.lexer.token();
-            const cond = self.parseExpr();
-            _ = self.lexer.expect(.rparen);
-            self.current = self.lexer.token();
-            const body = self.parseExpr();
-            const node = Expr.init(self.allocator, .whileexpr);
-            node.children.append(cond) catch @panic("append");
-            node.children.append(body) catch @panic("append");
-            return node;
-        }
-        if (tok.kind == .lbrace) {
-            self.advance();
-            const block = Expr.init(self.allocator, .block);
-            while (self.current.kind != .rbrace) {
-                const expr = self.parseExpr();
-                block.children.append(expr) catch @panic("append");
-            }
-            _ = self.lexer.token();
-            self.advance(); // consume rbrace
-            return block;
-        }
-        if (tok.kind == .ident) {
-            self.advance();
-            if (self.current.kind == .eq) {
-                self.advance();
-                const rhs = self.parseExpr();
-                const node = Expr.init(self.allocator, .assign);
-                node.text = tok.text;
-                node.children.append(rhs) catch @panic("append");
-                return node;
-            }
-            if (self.current.kind == .lparen) {
-                self.advance();
-                const call = Expr.init(self.allocator, .call);
-                call.text = tok.text;
-                while (self.current.kind != .rparen) {
-                    const arg = self.parseExpr();
-                    call.children.append(arg) catch @panic("append");
-                    if (self.current.kind == .comma) self.advance();
-                }
-                _ = self.lexer.token();
-                self.advance(); // consume rparen
-                return call;
-            }
-            const ident = Expr.init(self.allocator, .ident);
-            ident.text = tok.text;
-            return ident;
-        }
-        if (tok.kind == .number) {
-            self.advance();
-            const num = Expr.init(self.allocator, .number);
-            num.ival = std.fmt.parseInt(i64, tok.text, 10) catch 0;
-            return num;
-        }
-        if (tok.kind == .string) {
-            self.advance();
-            const str = Expr.init(self.allocator, .string);
-            str.text = tok.text;
-            return str;
-        }
-        if (tok.kind == .lparen) {
-            self.advance();
-            const expr = self.parseExpr();
-            _ = self.lexer.expect(.rparen);
-            self.advance();
-            return expr;
-        }
-        std.debug.print("unexpected token {s} at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
-        std.process.exit(1);
+    if (tok.kind == .kw_while) {
+        _ = lexer.expect(.lparen);
+        const cond = parseExpression(lexer, allocator);
+        _ = lexer.expect(.rparen);
+        const body = parseExpression(lexer, allocator);
+        const node = Expr.init(allocator, .whileexpr);
+        node.children.append(cond) catch @panic("append");
+        node.children.append(body) catch @panic("append");
+        return node;
     }
-
-    fn parseParams(self: *Parser) std.ArrayList([]const u8) {
-        var params = std.ArrayList([]const u8).init(self.allocator);
-        // current token must be '('
-        if (self.current.kind != .lparen) {
-            std.debug.print("expected '(' at {}:{}\n", .{self.current.line, self.current.col});
-            std.process.exit(1);
-        }
-        self.advance(); // consume '('
+    if (tok.kind == .lbrace) {
+        const block = Expr.init(allocator, .block);
         while (true) {
-            if (self.current.kind == .rparen) {
-                self.advance();
-                break;
-            }
-            // expect parameter name (ident)
-            if (self.current.kind != .ident) {
-                std.debug.print("expected ident at {}:{}\n", .{self.current.line, self.current.col});
-                std.process.exit(1);
-            }
-            const id = self.current;
-            self.advance(); // consume ident
-            // expect colon
-            if (self.current.kind != .colon) {
-                std.debug.print("expected colon at {}:{}\n", .{self.current.line, self.current.col});
-                std.process.exit(1);
-            }
-            self.advance(); // consume colon
-            // expect type (ident)
-            if (self.current.kind != .ident) {
-                std.debug.print("expected type ident at {}:{}\n", .{self.current.line, self.current.col});
-                std.process.exit(1);
-            }
-            self.advance(); // consume type ident
-            params.append(id.text) catch @panic("append");
-            if (self.current.kind == .comma) {
-                self.advance(); // consume comma
-            }
+            const next = lexer.token();
+            if (next.kind == .rbrace) break;
+            const expr = parseExpression(lexer, allocator);
+            block.children.append(expr) catch @panic("append");
         }
-        return params;
+        return block;
     }
-};
+    if (tok.kind == .ident) {
+        const next = lexer.token();
+        if (next.kind == .eq) {
+            const rhs = parseExpression(lexer, allocator);
+            const node = Expr.init(allocator, .assign);
+            node.text = tok.text;
+            node.children.append(rhs) catch @panic("append");
+            return node;
+        }
+        if (next.kind == .lparen) {
+            const call = Expr.init(allocator, .call);
+            call.text = tok.text;
+            while (true) {
+                const arg = parseExpression(lexer, allocator);
+                call.children.append(arg) catch @panic("append");
+                const sep = lexer.token();
+                if (sep.kind == .rparen) break;
+                if (sep.kind != .comma) {
+                    std.debug.print("expected comma or rparen at {}:{}\n", .{sep.line, sep.col});
+                    std.process.exit(1);
+                }
+            }
+            return call;
+        }
+        const ident = Expr.init(allocator, .ident);
+        ident.text = tok.text;
+        return ident;
+    }
+    if (tok.kind == .number) {
+        const num = Expr.init(allocator, .number);
+        num.ival = std.fmt.parseInt(i64, tok.text, 10) catch 0;
+        return num;
+    }
+    if (tok.kind == .string) {
+        const str = Expr.init(allocator, .string);
+        str.text = tok.text;
+        return str;
+    }
+    if (tok.kind == .lparen) {
+        const expr = parseExpression(lexer, allocator);
+        _ = lexer.expect(.rparen);
+        return expr;
+    }
+    std.debug.print("unexpected token {s} at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
+    std.process.exit(1);
+}
 
 const Intercept = struct {
     name: []const u8,
@@ -359,7 +289,32 @@ const Daemon = struct {
     }
 };
 
-fn parseDaemon(allocator: std.mem.Allocator, lexer: *Lexer) Daemon {
+fn parseParams(lexer: *Lexer, allocator: std.mem.Allocator) std.ArrayList([]const u8) {
+    var params = std.ArrayList([]const u8).init(allocator);
+    _ = lexer.expect(.lparen);
+    while (true) {
+        const next = lexer.token();
+        if (next.kind == .rparen) break;
+        if (next.kind != .ident) {
+            std.debug.print("expected param name at {}:{}\n", .{next.line, next.col});
+            std.process.exit(1);
+        }
+        const name = next.text;
+        _ = lexer.expect(.colon);
+        _ = lexer.expect(.ident);
+        params.append(name) catch @panic("append");
+        const sep = lexer.token();
+        if (sep.kind == .comma) continue;
+        if (sep.kind != .rparen) {
+            std.debug.print("expected comma or rparen at {}:{}\n", .{sep.line, sep.col});
+            std.process.exit(1);
+        }
+        break;
+    }
+    return params;
+}
+
+fn parseDaemon(lexer: *Lexer, allocator: std.mem.Allocator) Daemon {
     var daemon = Daemon.init(allocator);
     _ = lexer.expect(.kw_daemon);
     const name_tok = lexer.expect(.ident);
@@ -368,30 +323,24 @@ fn parseDaemon(allocator: std.mem.Allocator, lexer: *Lexer) Daemon {
     _ = lexer.expect(.rparen);
     _ = lexer.expect(.lbrace);
 
-    var parser = Parser.init(allocator, lexer);
-    parser.current = lexer.token();
-
-    while (parser.current.kind != .rbrace) {
-        if (parser.current.kind == .kw_intercept) {
-            parser.advance();
+    while (true) {
+        const tok = lexer.token();
+        if (tok.kind == .rbrace) break;
+        if (tok.kind == .kw_intercept) {
             const name_tok2 = lexer.expect(.ident);
-            parser.current = lexer.token();
-            const params = parser.parseParams();
+            const params = parseParams(lexer, allocator);
             _ = lexer.expect(.arrow);
-            parser.current = lexer.token();
             _ = lexer.expect(.ident);
-            parser.current = lexer.token();
-            const body = parser.parseExpr();
+            const body = parseExpression(lexer, allocator);
             daemon.intercepts.append(.{ .name = name_tok2.text, .params = params, .body = body }) catch @panic("append");
-        } else if (parser.current.kind == .kw_build) {
-            parser.advance();
-            const body = parser.parseExpr();
+        } else if (tok.kind == .kw_build) {
+            const body = parseExpression(lexer, allocator);
             daemon.builds.append(body) catch @panic("append");
         } else {
-            _ = parser.parseExpr();
+            std.debug.print("unexpected token {s} at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
+            std.process.exit(1);
         }
     }
-    _ = lexer.token();
     return daemon;
 }
 
@@ -525,7 +474,7 @@ pub fn main() !void {
     defer alloc.free(source);
 
     var lexer = Lexer.init(source);
-    var daemon = parseDaemon(alloc, &lexer);
+    var daemon = parseDaemon(&lexer, alloc);
     defer daemon.deinit();
 
     const c_code = try generateC(&daemon, alloc);

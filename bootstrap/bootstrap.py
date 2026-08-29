@@ -3,69 +3,389 @@ import sys
 import re
 import os
 
-def parse_gr(filename):
-    with open(filename, 'r') as f:
-        src = f.read()
+class Parser:
+    def __init__(self, src):
+        self.src = src
+        self.pos = 0
+        self.tokens = self.tokenize(src)
+        self.idx = 0
 
-    # Extract daemon name
-    daemon_match = re.search(r'daemon\s+(\w+)\s*\(', src)
-    if not daemon_match:
-        print("No daemon found")
-        sys.exit(1)
-    daemon_name = daemon_match.group(1)
+    def tokenize(self, src):
+        # Simple tokenizer: identifiers, numbers, strings, punctuation, operators
+        token_re = re.compile(r'''\s*(?:
+            ([a-zA-Z_][a-zA-Z0-9_]*) |  # identifiers and keywords
+            (\d+) |                      # numbers
+            ("[^"]*") |                  # strings
+            (->) |                       # arrow
+            ([{}()\[\],:]) |             # braces, brackets, parens, colon, comma
+            (≈) |                        # assignment
+            (.)                          # catch-all
+        )''', re.VERBOSE)
+        tokens = []
+        for m in token_re.finditer(src):
+            # skip whitespace captured as empty
+            if m.group(0).strip() == '':
+                continue
+            # identify token kind
+            if m.group(1):
+                tokens.append(('ident', m.group(1)))
+            elif m.group(2):
+                tokens.append(('number', m.group(2)))
+            elif m.group(3):
+                tokens.append(('string', m.group(3)))
+            elif m.group(4):
+                tokens.append(('arrow', '->'))
+            elif m.group(5):
+                tokens.append(('punct', m.group(5)))
+            elif m.group(6):
+                tokens.append(('assign', '≈'))
+            else:
+                tokens.append(('unknown', m.group(0)))
+        return tokens
 
-    # Find intercept block
-    intercept_match = re.search(
-        r'intercept\s+(\w+)\s*\(([^)]*)\)\s*->\s*\w+\s*\{([^}]*)\}',
-        src, re.DOTALL
-    )
-    if not intercept_match:
-        print("No intercept found")
-        sys.exit(1)
+    def peek(self):
+        if self.idx < len(self.tokens):
+            return self.tokens[self.idx]
+        return None
 
-    func_name = intercept_match.group(1)
-    params_str = intercept_match.group(2).strip()
-    body = intercept_match.group(3).strip()
+    def next_token(self):
+        tok = self.peek()
+        if tok:
+            self.idx += 1
+        return tok
 
-    # Parse parameters
-    params = []
-    if params_str:
-        for p in params_str.split(','):
-            parts = p.strip().split(':')
-            if len(parts) == 2:
-                params.append(parts[0].strip())
+    def expect(self, typ, val=None):
+        tok = self.next_token()
+        if tok is None:
+            raise SyntaxError(f"expected {typ} but got EOF")
+        if tok[0] != typ:
+            raise SyntaxError(f"expected {typ} but got {tok[0]}")
+        if val is not None and tok[1] != val:
+            raise SyntaxError(f"expected '{val}' but got '{tok[1]}'")
+        return tok
 
-    # Generate C code
-    c_code = f'''
+    def parse(self):
+        # Top-level: daemon
+        daemon_tok = self.next_token()
+        if daemon_tok is None or daemon_tok[1] != 'daemon':
+            raise SyntaxError("expected 'daemon'")
+        name_tok = self.expect('ident')
+        self.expect('punct', '(')
+        self.expect('punct', ')')
+        self.expect('punct', '{')
+        daemon = {'name': name_tok[1], 'functions': [], 'intercepts': [], 'builds': []}
+        while True:
+            tok = self.peek()
+            if tok is None or (tok[0] == 'punct' and tok[1] == '}'):
+                break
+            if tok[1] == 'fn':
+                daemon['functions'].append(self.parse_function())
+            elif tok[1] == 'intercept':
+                daemon['intercepts'].append(self.parse_intercept())
+            elif tok[1] == 'build':
+                daemon['builds'].append(self.parse_build())
+            else:
+                raise SyntaxError(f"unexpected token {tok}")
+        self.expect('punct', '}')
+        return daemon
+
+    def parse_function(self):
+        self.expect('ident', 'fn')
+        name_tok = self.expect('ident')
+        self.expect('punct', '(')
+        params = []
+        while True:
+            tok = self.peek()
+            if tok[0] == 'punct' and tok[1] == ')':
+                break
+            pname = self.expect('ident')
+            self.expect('punct', ':')
+            ptype = self.expect('ident')
+            params.append({'name': pname[1], 'type': ptype[1]})
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ',':
+                self.next_token()
+        self.expect('punct', ')')
+        self.expect('punct', '->')
+        rettype = self.expect('ident')
+        self.expect('punct', '{')
+        body = self.parse_expr()
+        self.expect('punct', '}')
+        return {'name': name_tok[1], 'params': params, 'rettype': rettype[1], 'body': body}
+
+    def parse_intercept(self):
+        self.expect('ident', 'intercept')
+        name_tok = self.expect('ident')
+        self.expect('punct', '(')
+        params = []
+        while True:
+            tok = self.peek()
+            if tok[0] == 'punct' and tok[1] == ')':
+                break
+            pname = self.expect('ident')
+            self.expect('punct', ':')
+            ptype = self.expect('ident')
+            params.append({'name': pname[1], 'type': ptype[1]})
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ',':
+                self.next_token()
+        self.expect('punct', ')')
+        self.expect('punct', '->')
+        rettype = self.expect('ident')
+        self.expect('punct', '{')
+        body = self.parse_expr()
+        self.expect('punct', '}')
+        return {'name': name_tok[1], 'params': params, 'rettype': rettype[1], 'body': body}
+
+    def parse_build(self):
+        self.expect('ident', 'build')
+        self.expect('punct', '{')
+        # build block is just an expression block (for now)
+        expr = self.parse_expr()
+        self.expect('punct', '}')
+        return expr
+
+    def parse_expr(self):
+        # We'll parse a block (list of statements) as a list
+        expr_list = []
+        while True:
+            tok = self.peek()
+            if tok is None or (tok[0] == 'punct' and tok[1] == '}'):
+                break
+            if tok[0] == 'punct' and tok[1] == ';':
+                self.next_token()
+                continue
+            expr = self.parse_atom()
+            expr_list.append(expr)
+            # optional semicolon
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ';':
+                self.next_token()
+        return expr_list if len(expr_list) > 1 else expr_list[0] if expr_list else None
+
+    def parse_atom(self):
+        tok = self.peek()
+        if tok is None:
+            return None
+        if tok[0] == 'ident':
+            if tok[1] == 'if':
+                return self.parse_if()
+            elif tok[1] == 'while':
+                return self.parse_while()
+            elif tok[1] == 'return':
+                return self.parse_return()
+            elif tok[1] == 'print':
+                return self.parse_print()
+            else:
+                return self.parse_call_or_var()
+        elif tok[0] == 'punct' and tok[1] == '(':
+            return self.parse_paren()
+        elif tok[0] == 'punct' and tok[1] == '[':
+            return self.parse_array()
+        elif tok[0] == 'number' or tok[0] == 'string':
+            self.next_token()
+            return tok
+        else:
+            raise SyntaxError(f"unexpected token {tok}")
+
+    def parse_if(self):
+        self.next_token()  # consume 'if'
+        self.expect('punct', '(')
+        cond = self.parse_atom()
+        self.expect('punct', ')')
+        then_expr = self.parse_atom()
+        else_expr = None
+        if self.peek() and self.peek()[0] == 'ident' and self.peek()[1] == 'else':
+            self.next_token()
+            else_expr = self.parse_atom()
+        return ('if', cond, then_expr, else_expr)
+
+    def parse_while(self):
+        self.next_token()  # consume 'while'
+        self.expect('punct', '(')
+        cond = self.parse_atom()
+        self.expect('punct', ')')
+        body = self.parse_atom()
+        return ('while', cond, body)
+
+    def parse_return(self):
+        self.next_token()  # consume 'return'
+        val = self.parse_atom()
+        return ('return', val)
+
+    def parse_print(self):
+        self.next_token()  # consume 'print'
+        self.expect('punct', '(')
+        args = []
+        while True:
+            arg = self.parse_atom()
+            args.append(arg)
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ',':
+                self.next_token()
+            else:
+                break
+        self.expect('punct', ')')
+        return ('print', args)
+
+    def parse_call_or_var(self):
+        name_tok = self.next_token()
+        # check for assignment
+        if self.peek() and self.peek()[0] == 'assign':
+            self.next_token()
+            rhs = self.parse_atom()
+            return ('assign', name_tok[1], rhs)
+        # function call?
+        if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == '(':
+            self.next_token()
+            args = []
+            while True:
+                arg = self.parse_atom()
+                args.append(arg)
+                if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ',':
+                    self.next_token()
+                else:
+                    break
+            self.expect('punct', ')')
+            return ('call', name_tok[1], args)
+        # variable reference
+        return ('var', name_tok[1])
+
+    def parse_paren(self):
+        self.next_token()  # consume '('
+        expr = self.parse_atom()
+        self.expect('punct', ')')
+        return expr
+
+    def parse_array(self):
+        self.next_token()  # consume '['
+        elems = []
+        while True:
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ']':
+                break
+            elem = self.parse_atom()
+            elems.append(elem)
+            if self.peek() and self.peek()[0] == 'punct' and self.peek()[1] == ',':
+                self.next_token()
+        self.expect('punct', ']')
+        return ('array', elems)
+
+def codegen(daemon, allocator):
+    # Generate C code from daemon AST
+    c_funcs = ''
+    c_intercepts = ''
+    c_main = ''
+    # Generate functions first
+    for fn in daemon['functions']:
+        c_funcs += generate_function(fn)
+    # Generate intercepts
+    for inter in daemon['intercepts']:
+        c_intercepts += generate_intercept(inter)
+    # Build main
+    c_main = generate_main(daemon)
+    return f'''
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
+#include <stdlib.h>
 
 int running = 1;
 void handle_sigterm(int s) {{ running = 0; }}
 
-int {func_name}_intercept({', '.join([f'const char* {p}' for p in params])}) {{
-    printf("intercepted: %s\\n", {params[0] if params else '""'});
+{c_funcs}
+{c_intercepts}
+{c_main}
+'''
+
+def generate_function(fn):
+    params = ', '.join([f'const char* {p["name"]}' if p["type"] == 'str' else f'int {p["name"]}' for p in fn['params']])
+    ret = 'int'  # for simplicity
+    body = generate_expr(fn['body'])
+    return f'''
+int {fn['name']}({params}) {{
+    {body}
+}}
+'''
+
+def generate_intercept(inter):
+    params = ', '.join([f'const char* {p["name"]}' if p["type"] == 'str' else f'int {p["name"]}' for p in inter['params']])
+    body = generate_expr(inter['body'])
+    return f'''
+int {inter['name']}_intercept({params}) {{
+    {body}
     return 0;
 }}
+'''
 
+def generate_main(daemon):
+    body = generate_expr(daemon['builds'][0]) if daemon['builds'] else ''
+    return f'''
 int main() {{
     signal(SIGTERM, handle_sigterm);
+    {body}
     printf("grind daemon started\\n");
     while (running) {{ sleep(1); }}
     return 0;
 }}
 '''
-    return c_code
 
-if __name__ == '__main__':
+def generate_expr(expr):
+    if expr is None:
+        return ''
+    if isinstance(expr, list):
+        # block
+        return ';\n    '.join([generate_expr(e) for e in expr if e is not None])
+    if isinstance(expr, tuple):
+        op = expr[0]
+        if op == 'if':
+            cond = generate_expr(expr[1])
+            then_part = generate_expr(expr[2])
+            else_part = generate_expr(expr[3]) if expr[3] is not None else ''
+            return f'if ({cond}) {{ {then_part} }} else {{ {else_part} }}'
+        elif op == 'while':
+            cond = generate_expr(expr[1])
+            body = generate_expr(expr[2])
+            return f'while ({cond}) {{ {body} }}'
+        elif op == 'return':
+            val = generate_expr(expr[1]) if expr[1] is not None else ''
+            return f'return {val};'
+        elif op == 'print':
+            args = ', '.join([generate_expr(a) for a in expr[1]])
+            return f'printf({args})'
+        elif op == 'assign':
+            rhs = generate_expr(expr[2])
+            return f'{expr[1]} = {rhs}'
+        elif op == 'call':
+            name = expr[1]
+            args = ', '.join([generate_expr(a) for a in expr[2]])
+            return f'{name}({args})'
+        elif op == 'var':
+            return expr[1]
+        elif op == 'array':
+            elems = ', '.join([generate_expr(e) for e in expr[1]])
+            return f'({elems})'  # not fully supported
+    if isinstance(expr, tuple) and len(expr)==2:
+        # could be token tuple
+        return str(expr[1])
+    if isinstance(expr, dict):
+        # not used
+        return ''
+    return str(expr)
+
+def main():
     if len(sys.argv) < 2:
         print("Usage: python3 bootstrap/bootstrap.py <file.gr>")
         sys.exit(1)
 
     gr_file = sys.argv[1]
-    c_code = parse_gr(gr_file)
+    with open(gr_file, 'r') as f:
+        src = f.read()
+
+    parser = Parser(src)
+    try:
+        daemon = parser.parse()
+    except SyntaxError as e:
+        print(f"Parse error: {e}")
+        sys.exit(1)
+
+    c_code = codegen(daemon, None)
     c_file = gr_file + '.c'
     with open(c_file, 'w') as f:
         f.write(c_code)
@@ -73,3 +393,6 @@ if __name__ == '__main__':
     out_file = gr_file + '.out'
     os.system(f'gcc -o {out_file} {c_file}')
     print(f'compiled: {out_file}')
+
+if __name__ == '__main__':
+    main()

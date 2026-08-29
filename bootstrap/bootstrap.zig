@@ -58,17 +58,6 @@ const Lexer = struct {
         }
     }
 
-    fn peekToken(self: *Lexer) Token {
-        const saved_pos = self.pos;
-        const saved_line = self.line;
-        const saved_col = self.col;
-        const tok = self.token();
-        self.pos = saved_pos;
-        self.line = saved_line;
-        self.col = saved_col;
-        return tok;
-    }
-
     fn token(self: *Lexer) Token {
         self.skipWhitespace();
         const start_line = self.line;
@@ -211,8 +200,10 @@ const Parser = struct {
         if (tok.kind == .kw_if) {
             self.advance();
             _ = self.lexer.expect(.lparen);
+            self.current = self.lexer.token();
             const cond = self.parseExpr();
             _ = self.lexer.expect(.rparen);
+            self.current = self.lexer.token();
             const then_expr = self.parseExpr();
             const else_expr = self.parseExpr();
             const node = Expr.init(self.allocator, .ifexpr);
@@ -224,8 +215,10 @@ const Parser = struct {
         if (tok.kind == .kw_while) {
             self.advance();
             _ = self.lexer.expect(.lparen);
+            self.current = self.lexer.token();
             const cond = self.parseExpr();
             _ = self.lexer.expect(.rparen);
+            self.current = self.lexer.token();
             const body = self.parseExpr();
             const node = Expr.init(self.allocator, .whileexpr);
             node.children.append(cond) catch @panic("append");
@@ -240,6 +233,7 @@ const Parser = struct {
                 block.children.append(expr) catch @panic("append");
             }
             _ = self.lexer.token();
+            self.advance(); // consume rbrace
             return block;
         }
         if (tok.kind == .ident) {
@@ -262,6 +256,7 @@ const Parser = struct {
                     if (self.current.kind == .comma) self.advance();
                 }
                 _ = self.lexer.token();
+                self.advance(); // consume rparen
                 return call;
             }
             const ident = Expr.init(self.allocator, .ident);
@@ -284,6 +279,7 @@ const Parser = struct {
             self.advance();
             const expr = self.parseExpr();
             _ = self.lexer.expect(.rparen);
+            self.advance();
             return expr;
         }
         std.debug.print("unexpected token {s} at {}:{}\n", .{ @tagName(tok.kind), tok.line, tok.col });
@@ -292,18 +288,39 @@ const Parser = struct {
 
     fn parseParams(self: *Parser) std.ArrayList([]const u8) {
         var params = std.ArrayList([]const u8).init(self.allocator);
-        _ = self.lexer.expect(.lparen);
+        // current token must be '('
+        if (self.current.kind != .lparen) {
+            std.debug.print("expected '(' at {}:{}\n", .{self.current.line, self.current.col});
+            std.process.exit(1);
+        }
+        self.advance(); // consume '('
         while (true) {
-            if (self.lexer.peekToken().kind == .rparen) {
-                _ = self.lexer.token();
+            if (self.current.kind == .rparen) {
+                self.advance();
                 break;
             }
-            const id = self.lexer.expect(.ident);
-            _ = self.lexer.expect(.colon);
-            _ = self.lexer.expect(.ident);
+            // expect parameter name (ident)
+            if (self.current.kind != .ident) {
+                std.debug.print("expected ident at {}:{}\n", .{self.current.line, self.current.col});
+                std.process.exit(1);
+            }
+            const id = self.current;
+            self.advance(); // consume ident
+            // expect colon
+            if (self.current.kind != .colon) {
+                std.debug.print("expected colon at {}:{}\n", .{self.current.line, self.current.col});
+                std.process.exit(1);
+            }
+            self.advance(); // consume colon
+            // expect type (ident)
+            if (self.current.kind != .ident) {
+                std.debug.print("expected type ident at {}:{}\n", .{self.current.line, self.current.col});
+                std.process.exit(1);
+            }
+            self.advance(); // consume type ident
             params.append(id.text) catch @panic("append");
-            if (self.lexer.peekToken().kind == .comma) {
-                _ = self.lexer.token();
+            if (self.current.kind == .comma) {
+                self.advance(); // consume comma
             }
         }
         return params;
@@ -358,9 +375,12 @@ fn parseDaemon(allocator: std.mem.Allocator, lexer: *Lexer) Daemon {
         if (parser.current.kind == .kw_intercept) {
             parser.advance();
             const name_tok2 = lexer.expect(.ident);
+            parser.current = lexer.token();
             const params = parser.parseParams();
             _ = lexer.expect(.arrow);
+            parser.current = lexer.token();
             _ = lexer.expect(.ident);
+            parser.current = lexer.token();
             const body = parser.parseExpr();
             daemon.intercepts.append(.{ .name = name_tok2.text, .params = params, .body = body }) catch @panic("append");
         } else if (parser.current.kind == .kw_build) {

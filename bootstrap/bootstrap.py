@@ -248,8 +248,10 @@ class Parser:
         elif func_name == 'print':
             return ('print', args)
         elif func_name == 'if':
-            if len(args) != 3:
-                raise SyntaxError("if takes 3 arguments: (if cond then else)")
+            if len(args) < 2 or len(args) > 3:
+                raise SyntaxError("if takes 2 or 3 arguments: (if cond then) or (if cond then else)")
+            if len(args) == 2:
+                args.append(('array', []))
             return ('if', args[0], args[1], args[2])
         elif func_name == 'while':
             if len(args) != 2:

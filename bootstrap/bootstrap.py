@@ -255,8 +255,9 @@ class Parser:
                 args = args[:3]
             return ('if', args[0], args[1], args[2])
         elif func_name == 'while':
-            if len(args) != 2:
-                raise SyntaxError("while takes 2 arguments: (while cond body)")
+            if len(args) < 2:
+                raise SyntaxError("while needs at least 2 arguments")
+            args = args[:2]
             return ('while', args[0], args[1])
         elif func_name in ('str-len', 'str-sub', 'str-concat', 'str-split', 'len', 'at', 'push', 'pop',
                            'read-file', 'write-file', 'exec', 'ord', 'ge', 'le', 'gt', 'or', 'and', 'not',

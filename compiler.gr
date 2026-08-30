@@ -92,7 +92,7 @@ daemon gristc () {
   fn ge (a : int, b : int) -> int { (return (not (lt a b))) }
   fn le (a : int, b : int) -> int { (return (not (gt a b))) }
   fn gt (a : int, b : int) -> int { (return (lt b a)) }
-  fn or (a : int, b : int) -> int { (return (if a 1 (if b 1 0) 0)) }
+  fn or (a : int, b : int) -> int { (return (if a 1 (if b 1 0))) }
   fn and (a : int, b : int) -> int { (return (if a (if b 1 0) 0)) }
   fn not (a : int) -> int { (return (if a 0 1)) }
   fn eq (a : str, b : str) -> int { (return (call eq a b)) }

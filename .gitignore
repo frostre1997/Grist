@@ -2,3 +2,6 @@ target/
 *.o
 *.out
 *.exe
+*.bak
+*.c
+*.out
